@@ -1,6 +1,5 @@
 package com.mycompany.tfi_comunic;
 
-import com.fazecast.jSerialComm.SerialPort;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
@@ -11,126 +10,145 @@ import java.nio.charset.StandardCharsets;
 
 public class VlcApp extends JFrame {
 
-    private SerialPort serialPort;
-    
+    private ComunicacionSerie comunicacion;
+
     private final JTextArea transLeftArea;
     private final JTextArea transRightArea;
-    private final JTextArea recLeftArea;
-    private final JTextArea recRightArea;
+    private final JTextPane recLeftArea;  
+    private final JTextPane recRightArea; 
     private final JTextPane resultArea;
     private final JTextField inputField;
     private final JButton sendButton;
-    
+    private final JLabel lblStatusPort;
+    private final JLabel lblStatusCRC;
+
     private final java.io.ByteArrayOutputStream bufferRecepcion = new java.io.ByteArrayOutputStream();
-    
+
     private byte[] ultimoMensajeEnviadoBytes;
     private String ultimoMensajeEnviadoTexto;
 
-    private static final Color BG_DARK = new Color(15, 23, 42);       // #0F172A
-    private static final Color BG_PANEL = new Color(30, 41, 59);      // #1E293B
-    private static final Color BORDER_COLOR = new Color(51, 65, 85);   // #334155
-    private static final Color TEXT_LIGHT = new Color(241, 245, 249);  // #F1F5F9
-    private static final Color ACCENT_BLUE = new Color(56, 189, 248);  // #38BDF8
-    private static final Color COLOR_OK = new Color(16, 185, 129);     // #10B981 (Verde)
-    private static final Color COLOR_ERR = new Color(239, 68, 68);     // #EF4444 (Rojo)
+    private static final Color BG_DARK = new Color(11, 15, 25);
+    private static final Color BG_CARD = new Color(20, 27, 45);
+    private static final Color BG_INPUT = new Color(15, 23, 42);
+    private static final Color BORDER_CARD = new Color(39, 51, 79);
+    private static final Color TEXT_WHITE = new Color(248, 250, 252);
+    private static final Color TEXT_MUTED = new Color(148, 163, 184);
+    private static final Color CYAN_ACCENT = new Color(56, 189, 248);
+    private static final Color COLOR_OK = new Color(34, 197, 94);
+    private static final Color COLOR_ERR = new Color(239, 68, 68);
+    private static final Color COLOR_WARN = new Color(245, 158, 11);
 
     public VlcApp() {
-        setTitle("Proyecto VLC - Transmisión por Luz Visible & Capa de Enlace (CRC-8)");
+        setTitle("Sistema VLC - Monitor de Capa de Enlace & Integridad CRC-8");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        
-        // Configuración para abrir en pantalla completa maximizada
         setExtendedState(JFrame.MAXIMIZED_BOTH);
-        setMinimumSize(new Dimension(1024, 720));
-        
+        setMinimumSize(new Dimension(1100, 750));
         getContentPane().setBackground(BG_DARK);
-        setLayout(new BorderLayout(12, 12));
-        ((JPanel) getContentPane()).setBorder(new EmptyBorder(16, 16, 16, 16));
+        setLayout(new BorderLayout(14, 14));
+        ((JPanel) getContentPane()).setBorder(new EmptyBorder(14, 18, 14, 18));
+        JPanel topHeader = new JPanel(new BorderLayout());
+        topHeader.setBackground(BG_CARD);
+        topHeader.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(BORDER_CARD, 1, true),
+                new EmptyBorder(10, 16, 10, 16)
+        ));
 
-        // Encabezado Superior Minimalista
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(BG_DARK);
-        headerPanel.setBorder(new EmptyBorder(0, 4, 8, 4));
-        
-        JLabel titleLabel = new JLabel("SISTEMA DE COMUNICACIÓN ÓPTICA VLC");
-        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
-        titleLabel.setForeground(TEXT_LIGHT);
-        
-        JLabel subLabel = new JLabel("Control de Errores e Integridad de Capa de Enlace | Notación Binaria Pura");
-        subLabel.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        subLabel.setForeground(ACCENT_BLUE);
-        
-        headerPanel.add(titleLabel, BorderLayout.NORTH);
-        headerPanel.add(subLabel, BorderLayout.SOUTH);
-        add(headerPanel, BorderLayout.NORTH);
+        JPanel headerTitles = new JPanel(new GridLayout(2, 1, 0, 2));
+        headerTitles.setOpaque(false);
+        JLabel titleMain = new JLabel("ESTACIÓN DE TRANSMISIÓN ÓPTICA VLC");
+        titleMain.setFont(new Font("Segoe UI", Font.BOLD, 17));
+        titleMain.setForeground(TEXT_WHITE);
+        JLabel titleSub = new JLabel("Capa Física OOK (LED/LDR) — Protocolo de Enlace framing 01111110 & Polinomio CRC-8");
+        titleSub.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        titleSub.setForeground(CYAN_ACCENT);
+        headerTitles.add(titleMain);
+        headerTitles.add(titleSub);
 
-        // Panel Central: 3 Secciones distribuidas uniformemente
-        JPanel centerPanel = new JPanel(new GridLayout(3, 1, 12, 12));
-        centerPanel.setBackground(BG_DARK);
+        JPanel headerBadges = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        headerBadges.setOpaque(false);
+        lblStatusPort = crearBadge("CONEXIÓN: BUSCANDO...", TEXT_MUTED);
+        lblStatusCRC = crearBadge("CANAL: REPOSO", TEXT_MUTED);
+        headerBadges.add(lblStatusPort);
+        headerBadges.add(lblStatusCRC);
 
-        // 1. Panel Transmisión
-        JPanel transPanel = new JPanel(new GridLayout(1, 2, 12, 0));
-        transPanel.setBackground(BG_DARK);
-        transPanel.setBorder(crearBordeTitulado("1. TRANSMISIÓN (Capa de Aplicación -> Enlace)"));
+        topHeader.add(headerTitles, BorderLayout.WEST);
+        topHeader.add(headerBadges, BorderLayout.EAST);
+        add(topHeader, BorderLayout.NORTH);
+
+        JSplitPane splitPrincipal = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        splitPrincipal.setOpaque(false);
+        splitPrincipal.setBorder(null);
+        splitPrincipal.setDividerSize(6);
+        splitPrincipal.setResizeWeight(0.66);
+
+        JPanel dataPanelsContainer = new JPanel(new GridLayout(1, 2, 14, 0));
+        dataPanelsContainer.setOpaque(false);
+
+        // Bloque TX
+        JPanel txBox = new JPanel(new GridLayout(2, 1, 0, 8));
+        txBox.setOpaque(false);
+        txBox.setBorder(crearBordeTitulado("CANAL TX: TRANSMISIÓN (ORIGEN)", CYAN_ACCENT));
         transLeftArea = crearTextAreaMonospaced();
         transRightArea = crearTextAreaMonospaced();
-        transPanel.add(crearScrollPaneEstilizado(transLeftArea));
-        transPanel.add(crearScrollPaneEstilizado(transRightArea));
+        txBox.add(crearScrollPane(transLeftArea));
+        txBox.add(crearScrollPane(transRightArea));
 
-        // 2. Panel Recepción
-        JPanel recPanel = new JPanel(new GridLayout(1, 2, 12, 0));
-        recPanel.setBackground(BG_DARK);
-        recPanel.setBorder(crearBordeTitulado("2. RECEPCIÓN & ANÁLISIS DIFERENCIAL (Capa Física -> Enlace)"));
-        recLeftArea = crearTextAreaMonospaced();
-        recRightArea = crearTextAreaMonospaced();
-        recPanel.add(crearScrollPaneEstilizado(recLeftArea));
-        recPanel.add(crearScrollPaneEstilizado(recRightArea));
+        // Bloque RX
+        JPanel rxBox = new JPanel(new GridLayout(2, 1, 0, 8));
+        rxBox.setOpaque(false);
+        rxBox.setBorder(crearBordeTitulado("CANAL RX: RECEPCIÓN & MATRIZ DIFERENCIAL (DESTINO)", new Color(168, 85, 247)));
+        recLeftArea = crearTextPaneMonospaced();
+        recRightArea = crearTextPaneMonospaced();
+        rxBox.add(crearScrollPane(recLeftArea));
+        rxBox.add(crearScrollPane(recRightArea));
 
-        // 3. Panel Validación
-        JPanel valPanel = new JPanel(new BorderLayout());
-        valPanel.setBackground(BG_DARK);
-        valPanel.setBorder(crearBordeTitulado("3. CONTROL DE INTEGRIDAD & RECONSTRUCCIÓN (CRC-8: Polinomio 00000111)"));
-        resultArea = new JTextPane();
-        resultArea.setEditable(false);
-        resultArea.setBackground(BG_PANEL);
-        resultArea.setFont(new Font("Consolas", Font.BOLD, 14));
-        valPanel.add(crearScrollPaneEstilizado(resultArea), BorderLayout.CENTER);
+        dataPanelsContainer.add(txBox);
+        dataPanelsContainer.add(rxBox);
+        splitPrincipal.setTopComponent(dataPanelsContainer);
 
-        centerPanel.add(transPanel);
-        centerPanel.add(recPanel);
-        centerPanel.add(valPanel);
-        add(centerPanel, BorderLayout.CENTER);
+        // Sección Inferior: Validación CRC-8 y Reconstrucción
+        JPanel valBox = new JPanel(new BorderLayout());
+        valBox.setOpaque(false);
+        valBox.setBorder(crearBordeTitulado("VERIFICACIÓN DE CAPA 2 (MÁQUINA DE ESTADO CRC-8)", COLOR_OK));
+        resultArea = crearTextPaneMonospaced();
+        valBox.add(crearScrollPane(resultArea), BorderLayout.CENTER);
+        splitPrincipal.setBottomComponent(valBox);
 
-        // Panel Inferior: Barra de Envío
-        JPanel bottomPanel = new JPanel(new BorderLayout(12, 0));
-        bottomPanel.setBackground(BG_DARK);
-        bottomPanel.setBorder(new EmptyBorder(8, 4, 4, 4));
+        add(splitPrincipal, BorderLayout.CENTER);
 
-        JLabel inputLabel = new JLabel("Mensaje a transmitir (Texto Plano): ");
-        inputLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        inputLabel.setForeground(TEXT_LIGHT);
-        bottomPanel.add(inputLabel, BorderLayout.WEST);
-
-        inputField = new JTextField();
-        inputField.setBackground(BG_PANEL);
-        inputField.setForeground(TEXT_LIGHT);
-        inputField.setCaretColor(ACCENT_BLUE);
-        inputField.setFont(new Font("Segoe UI", Font.PLAIN, 15));
-        inputField.setBorder(BorderFactory.createCompoundBorder(
-                new LineBorder(BORDER_COLOR, 1, true),
+        JPanel bottomBar = new JPanel(new BorderLayout(12, 0));
+        bottomBar.setBackground(BG_CARD);
+        bottomBar.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(BORDER_CARD, 1, true),
                 new EmptyBorder(8, 12, 8, 12)
         ));
-        bottomPanel.add(inputField, BorderLayout.CENTER);
 
-        sendButton = new JButton("TRANSMITIR TRAMA");
-        sendButton.setFont(new Font("Segoe UI", Font.BOLD, 13));
-        sendButton.setBackground(ACCENT_BLUE);
+        JLabel promptLabel = new JLabel("Mensaje UTF-8 (Carga Útil):");
+        promptLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        promptLabel.setForeground(TEXT_WHITE);
+        bottomBar.add(promptLabel, BorderLayout.WEST);
+
+        inputField = new JTextField();
+        inputField.setBackground(BG_INPUT);
+        inputField.setForeground(TEXT_WHITE);
+        inputField.setCaretColor(CYAN_ACCENT);
+        inputField.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        inputField.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(BORDER_CARD, 1, true),
+                new EmptyBorder(6, 10, 6, 10)
+        ));
+        bottomBar.add(inputField, BorderLayout.CENTER);
+
+        sendButton = new JButton("TRANSMITIR TRAMA VLC");
+        sendButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        sendButton.setBackground(CYAN_ACCENT);
         sendButton.setForeground(BG_DARK);
         sendButton.setFocusPainted(false);
-        sendButton.setBorder(new EmptyBorder(10, 24, 10, 24));
         sendButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        bottomPanel.add(sendButton, BorderLayout.EAST);
+        sendButton.setBorder(new EmptyBorder(8, 20, 8, 20));
+        bottomBar.add(sendButton, BorderLayout.EAST);
 
-        add(bottomPanel, BorderLayout.SOUTH);
+        add(bottomBar, BorderLayout.SOUTH);
 
         sendButton.addActionListener(e -> enviarMensaje());
         inputField.addActionListener(e -> enviarMensaje());
@@ -138,121 +156,128 @@ public class VlcApp extends JFrame {
         conectarPuertoSerie();
     }
 
-    private TitledBorder crearBordeTitulado(String titulo) {
-        TitledBorder border = BorderFactory.createTitledBorder(
-                new LineBorder(BORDER_COLOR, 1, true),
+    private JLabel crearBadge(String texto, Color col) {
+        JLabel l = new JLabel(texto);
+        l.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        l.setForeground(col);
+        l.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(col, 1, true),
+                new EmptyBorder(3, 8, 3, 8)
+        ));
+        return l;
+    }
+
+    private void actualizarBadge(JLabel label, String texto, Color col) {
+        label.setText(texto);
+        label.setForeground(col);
+        label.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(col, 1, true),
+                new EmptyBorder(3, 8, 3, 8)
+        ));
+    }
+
+    private TitledBorder crearBordeTitulado(String titulo, Color colorTitulo) {
+        return BorderFactory.createTitledBorder(
+                new LineBorder(BORDER_CARD, 1, true),
                 " " + titulo + " ",
                 TitledBorder.LEFT,
                 TitledBorder.TOP,
-                new Font("Segoe UI", Font.BOLD, 13),
-                ACCENT_BLUE
+                new Font("Segoe UI", Font.BOLD, 12),
+                colorTitulo
         );
-        return border;
     }
 
-    private JScrollPane crearScrollPaneEstilizado(Component comp) {
-        JScrollPane scroll = new JScrollPane(comp);
-        scroll.setBorder(new LineBorder(BORDER_COLOR, 1, true));
-        scroll.getViewport().setBackground(BG_PANEL);
-        return scroll;
+    private JScrollPane crearScrollPane(Component c) {
+        JScrollPane sp = new JScrollPane(c);
+        sp.setBorder(new LineBorder(BORDER_CARD, 1, true));
+        sp.getViewport().setBackground(BG_CARD);
+        return sp;
     }
 
     private JTextArea crearTextAreaMonospaced() {
         JTextArea area = new JTextArea();
         area.setEditable(false);
-        area.setBackground(BG_PANEL);
-        area.setForeground(TEXT_LIGHT);
-        area.setFont(new Font("Consolas", Font.PLAIN, 14));
-        area.setMargin(new Insets(10, 12, 10, 12));
+        area.setBackground(BG_CARD);
+        area.setForeground(TEXT_WHITE);
+        area.setFont(new Font("Consolas", Font.PLAIN, 13));
+        area.setMargin(new Insets(8, 10, 8, 10));
         return area;
     }
 
+    private JTextPane crearTextPaneMonospaced() {
+        JTextPane pane = new JTextPane();
+        pane.setEditable(false);
+        pane.setBackground(BG_CARD);
+        pane.setFont(new Font("Consolas", Font.PLAIN, 13));
+        pane.setMargin(new Insets(8, 10, 8, 10));
+        return pane;
+    }
+
     private void conectarPuertoSerie() {
-        SerialPort[] puertos = SerialPort.getCommPorts();
-        if (puertos.length == 0) {
-            agregarLogColor("Error: No se detectó ningún hardware Arduino conectado.", COLOR_ERR);
-            return;
-        }
+        comunicacion = new ComunicacionSerie(this::recibirBytes);
+        String resultado = comunicacion.conectar();
 
-        serialPort = puertos[0];
-        serialPort.setBaudRate(9600);
-
-        if (serialPort.openPort()) {
-            agregarLogColor("Sistema Conectado exitosamente al puerto " + serialPort.getSystemPortName() + " (9600 baudios, 8N1).", ACCENT_BLUE);
-            iniciarEscucha();
+        if (comunicacion.estaConectada()) {
+            actualizarBadge(lblStatusPort, "CONECTADO: " + comunicacion.getNombrePuerto(), COLOR_OK);
+            agregarLogColor(resultArea, resultado + "\n", CYAN_ACCENT);
+            comunicacion.iniciarEscucha();
         } else {
-            agregarLogColor("Error crítico al intentar abrir el puerto de comunicación.", COLOR_ERR);
+            actualizarBadge(lblStatusPort, "HARDWARE: DESCONECTADO", COLOR_ERR);
+            agregarLogColor(resultArea, resultado + "\n", COLOR_ERR);
         }
     }
 
+    private void recibirBytes(byte[] bytes){
+        SwingUtilities.invokeLater(() -> procesarBytesRecibidos(bytes));
+    }
+
     private String aBinario8(int valor) {
-        return String.format("%8s", Integer.toBinaryString(valor & 0xFF)).replace(' ', '0');
+        return ProtocoloVlc.aBinario8(valor);
     }
 
     private void enviarMensaje() {
         String texto = inputField.getText().trim();
-        if (texto.isEmpty() || serialPort == null || !serialPort.isOpen()) return;
+        if (texto.isEmpty() || comunicacion == null || !comunicacion.estaConectada()) return;
+
+        transLeftArea.setText("");
+        transRightArea.setText("");
+        recLeftArea.setText("");
+        recRightArea.setText("");
+        resultArea.setText("");
+        bufferRecepcion.reset();
 
         byte[] datos = texto.getBytes(StandardCharsets.UTF_8);
         int longitud = Math.min(datos.length, 16);
 
-        recLeftArea.setText("");
-        recRightArea.setText("");
-        bufferRecepcion.reset();
-
-        ultimoMensajeEnviadoTexto = texto.substring(0, longitud);
         ultimoMensajeEnviadoBytes = new byte[longitud];
         System.arraycopy(datos, 0, ultimoMensajeEnviadoBytes, 0, longitud);
+        ultimoMensajeEnviadoTexto = new String(ultimoMensajeEnviadoBytes, StandardCharsets.UTF_8);
 
-        // 1. Panel Transmisión (Izquierda): Representación Textual
+        actualizarBadge(lblStatusCRC, "TRANSMITIENDO...", CYAN_ACCENT);
+
         StringBuilder transLeft = new StringBuilder();
         transLeft.append("CADENA ORIGINAL: \"").append(ultimoMensajeEnviadoTexto).append("\"\n");
         transLeft.append("LONGITUD ÚTIL:   ").append(longitud).append(" caracteres (")
-                 .append(aBinario8(longitud)).append(" en binario)\n\n");
-        transLeft.append("ESTRUCTURA DE ENLACE ENVIADA:\n");
-        transLeft.append("• Sincronismo (START): 01111110\n");
-        transLeft.append("• Campo Longitud:      ").append(aBinario8(longitud)).append("\n");
-        transLeft.append("• Carga Útil:          ").append(longitud * 8).append(" bits de datos\n");
+                 .append(aBinario8(longitud)).append(")\n\n");
+        transLeft.append("ESTRUCTURA DE TRAMA FORMATEADA:\n");
+        transLeft.append("• START (Sincronismo): 01111110\n");
+        transLeft.append("• Campo Longitud (N):  ").append(aBinario8(longitud)).append("\n");
+        transLeft.append("• Tamaño Carga Útil:   ").append(longitud * 8).append(" bits de datos\n");
         transLeftArea.setText(transLeft.toString());
 
-        // 1. Panel Transmisión (Derecha): Desglose Carácter -> Binario
         StringBuilder transRight = new StringBuilder();
-        transRight.append("DESGLOSE BINARIO DE TRANSMISIÓN (ASCII 8 BITS):\n");
-        transRight.append("------------------------------------------------\n");
+        transRight.append("DESGLOSE BINARIO NOMINAL (ASCII 8 BITS):\n");
+        transRight.append("--------------------------------------------------\n");
         for (int i = 0; i < longitud; i++) {
             char c = (char) datos[i];
-            transRight.append(String.format(" Carácter '%c' -> Binario: %s\n", c, aBinario8(datos[i])));
+            transRight.append(String.format(" Carácter '%c' (Pos %d) -> %s\n", c, (i + 1), aBinario8(datos[i])));
         }
         transRightArea.setText(transRight.toString());
 
-        // Construcción de la Trama Física
-        byte[] cuerpo = new byte[longitud + 1];
-        cuerpo[0] = (byte) longitud;
-        System.arraycopy(datos, 0, cuerpo, 1, longitud);
-
-        byte crc = calcularCRC8(cuerpo);
-
-        byte[] trama = new byte[cuerpo.length + 2];
-        trama[0] = 0x7E; // delimitador de inicio (01111110)
-        System.arraycopy(cuerpo, 0, trama, 1, cuerpo.length);
-        trama[trama.length - 1] = crc;
-
-        serialPort.writeBytes(trama, trama.length);
+        // Construcción de la Trama
+        byte[] trama = ProtocoloVlc.crearTrama(ultimoMensajeEnviadoBytes);
+        comunicacion.enviar(trama);
         inputField.setText("");
-    }
-
-    private void iniciarEscucha() {
-        Thread thread = new Thread(() -> {
-            while (serialPort.isOpen()) {
-                if (serialPort.bytesAvailable() > 0) {
-                    byte[] readBuffer = new byte[serialPort.bytesAvailable()];
-                    serialPort.readBytes(readBuffer, readBuffer.length);
-                    procesarBytesRecibidos(readBuffer);
-                }
-                try { Thread.sleep(50); } catch (Exception e) {}
-            }
-        });
-        thread.start();
     }
 
     private void procesarBytesRecibidos(byte[] buffer) {
@@ -289,23 +314,39 @@ public class VlcApp extends JFrame {
         System.arraycopy(trama, 2, datosRecibidos, 0, dataLen);
         byte crcRecibido = trama[trama.length - 1];
 
-        // 1. Panel Recepción (Derecha): Desglose binario recibido
-        StringBuilder binRecibidoLog = new StringBuilder();
-        binRecibidoLog.append("DESGLOSE BINARIO DE RECEPCIÓN (8 BITS):\n");
-        binRecibidoLog.append("------------------------------------------------\n");
-        for (byte b : datosRecibidos) {
-            int val = b & 0xFF;
-            char c = (val >= 32 && val <= 126) ? (char) val : '?';
-            binRecibidoLog.append(String.format(" Símbolo '%c' -> Binario: %s\n", c, aBinario8(val)));
-        }
-        recRightArea.setText(binRecibidoLog.toString());
+        //Panel Recepción (Derecha): Tira binaria con bits erróneos pintados
+        recRightArea.setText("");
+        agregarTextoEstilizado(recRightArea, "DESGLOSE BINARIO DE RECEPCIÓN (8 BITS):\n", TEXT_WHITE, true);
+        agregarTextoEstilizado(recRightArea, "--------------------------------------------------\n", BORDER_CARD, false);
 
-        // 2. Panel Recepción (Izquierda): Matriz Diferencial de Bits (Tx vs Rx con XOR)
-        StringBuilder detallesRecepcion = new StringBuilder();
+        for (int i = 0; i < datosRecibidos.length; i++) {
+            byte sent = ultimoMensajeEnviadoBytes[i];
+            byte rec = datosRecibidos[i];
+            int val = rec & 0xFF;
+            char c = (val >= 32 && val <= 126) ? (char) val : '?';
+
+            agregarTextoEstilizado(recRightArea, String.format(" Símbolo '%c' (Pos %d) -> ", c, (i + 1)), TEXT_MUTED, false);
+
+            for (int b = 7; b >= 0; b--) {
+                int bitSent = (sent >> b) & 1;
+                int bitRec = (rec >> b) & 1;
+                String bitStr = String.valueOf(bitRec);
+
+                if (bitSent != bitRec) {
+                    agregarTextoEstilizado(recRightArea, bitStr, COLOR_ERR, true); // Bit corrupto en Rojo
+                } else {
+                    agregarTextoEstilizado(recRightArea, bitStr, TEXT_WHITE, false); // Bit sano en Blanco
+                }
+            }
+            agregarTextoEstilizado(recRightArea, "\n", TEXT_WHITE, false);
+        }
+
+        //Panel Recepción (Izquierda): Matriz Diferencial XOR con colores por celda
+        recLeftArea.setText("");
         String textoRecibidoCrudo = new String(datosRecibidos, StandardCharsets.ISO_8859_1);
-        detallesRecepcion.append("CADENA RECIBIDA: \"").append(textoRecibidoCrudo).append("\"\n\n");
-        detallesRecepcion.append("MATRIZ DIFERENCIAL DE BITS POR CARÁCTER (XOR):\n");
-        detallesRecepcion.append("=========================================================================\n");
+        agregarTextoEstilizado(recLeftArea, "CADENA CAPTURADA DEL MEDIO: \"" + textoRecibidoCrudo + "\"\n\n", TEXT_WHITE, true);
+        agregarTextoEstilizado(recLeftArea, "MATRIZ DIFERENCIAL DE BITS POR CARÁCTER (XOR):\n", CYAN_ACCENT, true);
+        agregarTextoEstilizado(recLeftArea, "=========================================================================\n", BORDER_CARD, false);
 
         boolean huboErrorFisico = false;
         StringBuilder logCorreccion = new StringBuilder();
@@ -318,11 +359,11 @@ public class VlcApp extends JFrame {
 
             if (sent != rec) {
                 huboErrorFisico = true;
-                detallesRecepcion.append(String.format("Posición %d | Esperado: '%c' (%s) | Recibido: '%c' (%s)\n",
-                        (i + 1), charSent, aBinario8(sent), charRec, aBinario8(rec)));
-                detallesRecepcion.append("  -----------------------------------------------------------------------\n");
-                detallesRecepcion.append("  Bit Nº   | Tx (Nominal) | Rx (Medio) | XOR (Error) | Diagnóstico\n");
-                detallesRecepcion.append("  -----------------------------------------------------------------------\n");
+                agregarTextoEstilizado(recLeftArea, String.format("Posición %d | Nominal: '%c' (%s) | Recibido: '%c' (%s)\n",
+                        (i + 1), charSent, aBinario8(sent), charRec, aBinario8(rec)), COLOR_WARN, true);
+                agregarTextoEstilizado(recLeftArea, "  -----------------------------------------------------------------------\n", BORDER_CARD, false);
+                agregarTextoEstilizado(recLeftArea, "  Bit Nº   | Tx (Nominal) | Rx (Medio) | XOR (Error) | Diagnóstico\n", TEXT_MUTED, false);
+                agregarTextoEstilizado(recLeftArea, "  -----------------------------------------------------------------------\n", BORDER_CARD, false);
 
                 int xor = (sent ^ rec) & 0xFF;
                 for (int b = 7; b >= 0; b--) {
@@ -331,79 +372,76 @@ public class VlcApp extends JFrame {
                     int bitXor = (xor >> b) & 1;
                     int numBit = 8 - b;
 
-                    String estado = (bitXor == 0) ? "OK (Íntegro)" : String.format("FALLO [%d -> %d]", bitTx, bitRx);
-                    detallesRecepcion.append(String.format("  Bit %d    |      %d       |     %d      |      %d      | %s\n",
-                            numBit, bitTx, bitRx, bitXor, estado));
-                }
-                detallesRecepcion.append("  -----------------------------------------------------------------------\n\n");
+                    agregarTextoEstilizado(recLeftArea, String.format("  Bit %d    |      %d       |     ", numBit, bitTx), TEXT_WHITE, false);
 
-                logCorreccion.append(String.format("  - Carácter %d: Recibido %s -> Reconstruido a %s ('%c')\n",
+                    if (bitXor == 1) {
+                        agregarTextoEstilizado(recLeftArea, String.valueOf(bitRx), COLOR_ERR, true);
+                        agregarTextoEstilizado(recLeftArea, String.format("      |      %d      | ", bitXor), TEXT_WHITE, false);
+                        agregarTextoEstilizado(recLeftArea, String.format("FALLO [%d -> %d]\n", bitTx, bitRx), COLOR_ERR, true);
+                    } else {
+                        agregarTextoEstilizado(recLeftArea, String.valueOf(bitRx), TEXT_WHITE, false);
+                        agregarTextoEstilizado(recLeftArea, String.format("      |      %d      | ", bitXor), TEXT_WHITE, false);
+                        agregarTextoEstilizado(recLeftArea, "OK (Íntegro)\n", COLOR_OK, false);
+                    }
+                }
+                agregarTextoEstilizado(recLeftArea, "  -----------------------------------------------------------------------\n\n", BORDER_CARD, false);
+
+                logCorreccion.append(String.format("  - Carácter %d: Recibido %s -> Restaurado a %s ('%c')\n",
                         (i + 1), aBinario8(rec), aBinario8(sent), charSent));
             }
         }
 
         if (!huboErrorFisico) {
-            detallesRecepcion.append("Todos los pulsos binarios coincidieron sin alteraciones (BER = 0).\n");
+            agregarTextoEstilizado(recLeftArea, "Canal Limpio: Todos los pulsos fotónicos muestreados con BER = 0.\n", COLOR_OK, false);
         }
-        recLeftArea.setText(detallesRecepcion.toString());
 
-        // 3. Panel Validación (Capa de Enlace)
+        //Panel Validación (Capa de Enlace: CRC-8)
         byte[] cuerpoParaCrc = new byte[dataLen + 1];
         cuerpoParaCrc[0] = byteLongitud;
         System.arraycopy(datosRecibidos, 0, cuerpoParaCrc, 1, dataLen);
-        byte crcCalculado = calcularCRC8(cuerpoParaCrc);
+        byte crcCalculado = ProtocoloVlc.calcularCRC8(cuerpoParaCrc);
 
         boolean estructuraValida = (byteInicio == 0x7E) && (byteLongitud == dataLen);
 
+        resultArea.setText("");
         if (!estructuraValida || crcCalculado != crcRecibido || huboErrorFisico) {
-            StringBuilder reporteError = new StringBuilder();
-            reporteError.append("FALLO DE INTEGRIDAD EN CAPA DE ENLACE (CRC-8)\n");
-            reporteError.append("  • CRC Recibido en Trama:  ").append(aBinario8(crcRecibido)).append("\n");
-            reporteError.append("  • CRC Recalculado Local:  ").append(aBinario8(crcCalculado)).append(" (Polinomio: 00000111)\n");
-            reporteError.append("  • Diagnóstico de Canal:   Discrepancia detectada. Trama descartada por ruido óptico/inversión.\n\n");
-            reporteError.append("MECANISMO DE CORRECCIÓN DIDÁCTICA (Bit a Bit):\n");
-            reporteError.append(logCorreccion.toString());
-            reporteError.append("-> TRAMA RESTAURADA FINAL: \"").append(ultimoMensajeEnviadoTexto).append("\"\n");
-            reporteError.append("------------------------------------------------------------------------------------------------\n");
-            agregarLogColor(reporteError.toString(), COLOR_ERR);
+            actualizarBadge(lblStatusCRC, "ESTADO: TRAMA DESCARTADA (CRC ERROR)", COLOR_ERR);
+
+            agregarTextoEstilizado(resultArea, "FALLO DE INTEGRIDAD EN CAPA DE ENLACE (CRC-8)\n", COLOR_ERR, true);
+            agregarTextoEstilizado(resultArea, "  • CRC Recibido en Trama:  " + aBinario8(crcRecibido) + "\n", TEXT_WHITE, false);
+            agregarTextoEstilizado(resultArea, "  • CRC Recalculado Local:  " + aBinario8(crcCalculado) + " (Polinomio generador: 00000111)\n", TEXT_WHITE, false);
+            agregarTextoEstilizado(resultArea, "  • Estado del Enlace:      Discrepancia detectada. Bloque descartado por perturbación en Capa 1.\n\n", COLOR_ERR, false);
+
+            agregarTextoEstilizado(resultArea, "RECONSTRUCCIÓN DEMOSTRATIVA DE CARGA ÚTIL:\n", CYAN_ACCENT, true);
+            agregarTextoEstilizado(resultArea, logCorreccion.toString(), TEXT_MUTED, false);
+            agregarTextoEstilizado(resultArea, "-> CARGA ÚTIL RESTAURADA: \"" + ultimoMensajeEnviadoTexto + "\"\n", COLOR_OK, true);
+            agregarTextoEstilizado(resultArea, "------------------------------------------------------------------------------------------------\n", BORDER_CARD, false);
         } else {
-            StringBuilder reporteExito = new StringBuilder();
-            reporteExito.append("TRAMA VÁLIDA RECIBIDA CON ÉXITO\n");
-            reporteExito.append("  • Mensaje Íntegro: \"").append(ultimoMensajeEnviadoTexto).append("\"\n");
-            reporteExito.append("  • Verificación CRC-8: ").append(aBinario8(crcRecibido))
-                        .append(" == ").append(aBinario8(crcCalculado)).append(" [COINCIDENCIA EXACTA - SIN ERRORES]\n");
-            reporteExito.append("------------------------------------------------------------------------------------------------\n");
-            agregarLogColor(reporteExito.toString(), COLOR_OK);
+            actualizarBadge(lblStatusCRC, "ESTADO: ENLACE ÍNTEGRO (OK)", COLOR_OK);
+
+            agregarTextoEstilizado(resultArea, "TRAMA VÁLIDA RECIBIDA CON ÉXITO\n", COLOR_OK, true);
+            agregarTextoEstilizado(resultArea, "  • Mensaje Íntegro: \"" + ultimoMensajeEnviadoTexto + "\"\n", TEXT_WHITE, false);
+            agregarTextoEstilizado(resultArea, "  • Verificación CRC-8: " + aBinario8(crcRecibido) + " == " + aBinario8(crcCalculado) + " [COINCIDENCIA EXACTA - SIN ERRORES]\n", COLOR_OK, false);
+            agregarTextoEstilizado(resultArea, "------------------------------------------------------------------------------------------------\n", BORDER_CARD, false);
         }
     }
 
-    private byte calcularCRC8(byte[] data) {
-        int crc = 0;
-        for (byte b : data) {
-            crc ^= (b & 0xFF);
-            for (int i = 0; i < 8; i++) {
-                if ((crc & 0x80) != 0) {
-                    crc = ((crc << 1) ^ 0x07) & 0xFF;
-                } else {
-                    crc = (crc << 1) & 0xFF;
-                }
-            }
-        }
-        return (byte) crc;
-    }
-
-    private void agregarLogColor(String mensaje, Color color) {
+    private void agregarTextoEstilizado(JTextPane pane, String texto, Color color, boolean bold) {
         SwingUtilities.invokeLater(() -> {
-            StyledDocument doc = resultArea.getStyledDocument();
-            Style style = resultArea.addStyle("ColorStyle", null);
+            StyledDocument doc = pane.getStyledDocument();
+            Style style = pane.addStyle("CustomStyle", null);
             StyleConstants.setForeground(style, color);
+            StyleConstants.setBold(style, bold);
             try {
-                doc.insertString(doc.getLength(), mensaje + "\n", style);
-                resultArea.setCaretPosition(doc.getLength());
+                doc.insertString(doc.getLength(), texto, style);
             } catch (BadLocationException e) {
                 e.printStackTrace();
             }
         });
+    }
+
+    private void agregarLogColor(JTextPane pane, String mensaje, Color color) {
+        agregarTextoEstilizado(pane, mensaje, color, false);
     }
 
     public static void main(String[] args) {
