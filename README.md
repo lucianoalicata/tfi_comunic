@@ -55,3 +55,81 @@ Parámetros del canal:
 - **Java 17 + Swing + Maven**.
 - Comunicación serie con `jSerialComm` (9600 bps, 8N1).
 - Estructura de paquetes:
+
+com.mycompany.tfi_comunic
+├── TfiComunicApplication.java → entrada
+├── core/ → protocolo puro (CRC, trama)
+├── io/ → transporte serie
+├── service/ → orquestadores de envío/recepción
+├── view/ → UI Swing (paneles + tema)
+└── util/ → utilidades genéricas
+
+text
+
+## Estructura de la trama
+
+| Campo      | Tamaño       | Descripción                                       |
+|------------|--------------|---------------------------------------------------|
+| START      | 8 bits       | Delimitador fijo `01111110` (`0x7E`)              |
+| LONGITUD   | 8 bits       | Cantidad `N` de caracteres de payload (1–16)      |
+| PAYLOAD    | `8 × N` bits | Caracteres del mensaje en ASCII/UTF-8             |
+| CRC-8      | 8 bits       | CRC calculado sobre `[LONGITUD + PAYLOAD]`        |
+
+El CRC-8 usa valor inicial `0x00` y polinomio generador `0x07`.
+
+## Requisitos
+
+- JDK 17 o superior.
+- Maven 3.8 o superior.
+- Arduino IDE (para cargar el sketch del microcontrolador).
+- Biblioteca `jSerialComm` (se resuelve vía Maven, ver `pom.xml`).
+- Placa Arduino Uno con el firmware VLC cargado.
+- Cable USB para conectar la placa a la PC.
+
+## Cómo levantar el proyecto
+
+1. Clonar el repositorio.
+2. Conectar el Arduino al puerto USB y cargar el sketch correspondiente.
+3. Compilar:
+
+   ```bash
+   mvn clean package
+Ejecutar:
+
+bash
+mvn exec:java -Dexec.mainClass="com.mycompany.tfi_comunic.TfiComunicApplication"
+o bien, desde el IDE, ejecutar TfiComunicApplication.main().
+
+Cómo probarlo
+Verificar que la placa esté conectada y el puerto serie libre.
+
+Al iniciar la aplicación se intentará abrir el primer puerto disponible;
+el badge superior mostrará el estado de conexión.
+
+Escribir un mensaje de 1 a 16 caracteres en el campo inferior y presionar
+TRANSMITIR TRAMA VLC.
+
+Observar en el panel superior izquierdo (TX) el desglose binario nominal
+y en el panel superior derecho (RX) el binario recibido y la matriz
+diferencial XOR.
+
+En el panel inferior se muestra el resultado del CRC-8:
+
+Enlace íntegro: los CRC coinciden y no hay bits alterados.
+
+Trama descartada: se muestra la diferencia entre CRC recibido y
+recalculado, y una reconstrucción didáctica del mensaje original.
+
+Para forzar errores, basta con tapar parcialmente el LED o introducir
+interferencia lumínica durante la transmisión.
+
+Notas sobre el diseño
+El código está organizado por capas: el protocolo (core) no conoce Swing,
+la UI (view) no conoce SerialPort y la capa io no conoce el protocolo.
+
+El CRC-8 detecta errores pero no corrige; la reconstrucción mostrada es
+didáctica y usa el buffer original en memoria.
+
+Los principios SOLID aplicados son: SRP (cada clase tiene una sola
+responsabilidad), OCP (paneles extensibles), LSP/ISP/DIP (interfaces
+ListenerRecepcion, ListenerValidacion, records de resultado).
