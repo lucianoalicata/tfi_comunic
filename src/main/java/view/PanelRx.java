@@ -45,7 +45,7 @@ public class PanelRx extends JPanel {
         append(areaBinario, "--------------------------------------------------\n",
                 TemaVlc.BORDER_CARD, false);
 
-        for (int i = 0; i < rec.length; i++) {
+        for (int i = 0; i < Math.min(rec.length, sent.length); i++) {
             int s = sent[i] & 0xFF, rr = rec[i] & 0xFF;
             char c = (rr >= 32 && rr <= 126) ? (char) rr : '?';
             append(areaBinario, String.format(" Símbolo '%c' (Pos %d) -> ", c, i + 1),
@@ -73,7 +73,12 @@ public class PanelRx extends JPanel {
         append(areaMatriz, "=========================================================================\n",
                 TemaVlc.BORDER_CARD, false);
 
-        for (int i = 0; i < rec.length; i++) {
+        if (rec.length != sent.length) {
+            append(areaMatriz, String.format(
+                    "LONGITUD alterada en el canal: enviada %d, recibida %d.\n\n",
+                    sent.length, rec.length), TemaVlc.COLOR_ERR, true);
+        }
+        for (int i = 0; i < Math.min(rec.length, sent.length); i++) {
             int s = sent[i] & 0xFF, rr = rec[i] & 0xFF;
             if (s == rr) continue;
 
@@ -116,6 +121,11 @@ public class PanelRx extends JPanel {
             append(areaMatriz,
                     "Canal Limpio: Todos los pulsos fotónicos muestreados con BER = 0.\n",
                     TemaVlc.COLOR_OK, false);
+        } else if (java.util.Arrays.equals(sent, rec)) {
+            append(areaMatriz,
+                    "Los bits de datos llegaron intactos; el canal alteró solo bits de paridad\n"
+                            + "Hamming (ver panel de corrección FEC).\n",
+                    TemaVlc.COLOR_WARN, false);
         }
     }
 

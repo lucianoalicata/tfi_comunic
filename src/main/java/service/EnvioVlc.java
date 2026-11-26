@@ -1,5 +1,7 @@
 package service;
 
+import core.HammingCodec;
+import core.ModoEnlace;
 import core.TramaVlc;
 import io.ComunicacionSerie;
 import java.nio.charset.StandardCharsets;
@@ -16,7 +18,7 @@ public class EnvioVlc {
     }
 
     /** @return la trama enviada, o null si el texto es inválido o no hay conexión. */
-    public TramaVlc enviarTexto(String texto) {
+    public TramaVlc enviarTexto(String texto, ModoEnlace modo) {
         if (!comunicacion.estaConectada() || texto == null || texto.isBlank()) {
             return null;
         }
@@ -27,8 +29,12 @@ public class EnvioVlc {
         System.arraycopy(datos, 0, payload, 0, longitud);
 
         TramaVlc trama = TramaVlc.desdePayload(payload);
-        recepcion.registrarEnvio(trama);
-        comunicacion.enviar(trama.aBytesTransmision());
+        byte[] aTransmitir = (modo == ModoEnlace.CRC_HAMMING)
+                ? HammingCodec.codificarTrama(trama.aBytesTransmision())
+                : trama.aBytesTransmision();
+
+        recepcion.registrarEnvio(trama, modo);
+        comunicacion.enviar(aTransmitir);
         return trama;
     }
 }

@@ -65,19 +65,18 @@ demuestra de forma concreta la interacción entre la **Capa Física (Capa
 
 ### Software (Capa de Enlace + Aplicación)
 
--   **Tecnologías:** Java 17 + Swing + Maven.
+-   **Tecnologías:** Java 21 + Swing + Maven.
 -   **Comunicación serie:** `jSerialComm` (9600 bps, 8N1).
 
 **Estructura de paquetes:**
 
 ``` text
-com.mycompany.tfi_comunic
-├── TfiComunicApplication.java  → entrada
-├── core/                       → protocolo puro (CRC, trama)
+src/main/java
+├── com/mycompany/tfi_comunic/Application.java → entrada
+├── core/                       → protocolo puro (CRC-8, trama, Hamming)
 ├── io/                         → transporte serie
 ├── service/                    → orquestadores de envío/recepción
-├── view/                       → UI Swing (paneles + tema)
-└── util/                       → utilidades genéricas
+└── view/                       → UI Swing (paneles + tema)
 ```
 
 ## Estructura de la trama
@@ -91,9 +90,35 @@ com.mycompany.tfi_comunic
 
 El CRC-8 usa valor inicial `0x00` y polinomio generador `0x07`.
 
+## Corrección de errores: FEC Hamming (12,8)
+
+Además de detectar con CRC-8, el enlace puede **corregir hacia adelante**
+con un código de Hamming (esquema de la cátedra, Unidad 6, punto 12):
+
+-   `n = 8` bits de datos y `p = 4` de paridad (`2^p >= n + p + 1`,
+    `16 >= 13`), paridad **par**.
+-   Los bits de paridad ocupan las posiciones 1, 2, 4 y 8; los de datos,
+    las posiciones 3, 5, 6, 7, 9, 10, 11 y 12.
+-   Cada byte del cuerpo de la trama (`LONGITUD`, `PAYLOAD`, `CRC-8`) se
+    transmite como una palabra de 12 bits dentro de 2 bytes
+    (`0000 + 12 bits`). `START` viaja sin codificar.
+-   En recepción, los 4 controles de paridad forman el **síndrome**; su
+    valor decimal es la posición del bit erróneo (0 = sin error).
+-   Después de corregir se recalcula el CRC-8 sobre la trama corregida:
+    si coincide, el mensaje se entrega; si no, se descarta (ARQ).
+
+Hamming corrige **1 bit por palabra**. Con 2 o más errores en la misma
+palabra (por ejemplo, una ráfaga de luz) puede corregir mal o marcarla
+como incorregible; en ese caso el CRC-8 detecta el problema.
+
+La interfaz tiene un casillero **FEC Hamming (12,8)** (activado por
+defecto). Desactivado, el enlace funciona solo con CRC-8 (detecta y
+descarta). La trama enviada con FEC activado ocupa casi el doble de
+bytes, por lo que la transmisión tarda proporcionalmente más.
+
 ## Requisitos
 
--   JDK 17 o superior.
+-   JDK 21 o superior.
 -   Maven 3.8 o superior.
 -   Arduino IDE (para cargar el sketch del microcontrolador).
 -   Biblioteca `jSerialComm` (se resuelve vía Maven, ver `pom.xml`).
@@ -116,11 +141,11 @@ El CRC-8 usa valor inicial `0x00` y polinomio generador `0x07`.
 4.  Ejecutar la aplicación:
 
     ``` bash
-    mvn exec:java -Dexec.mainClass="com.mycompany.tfi_comunic.TfiComunicApplication"
+    mvn exec:java -Dexec.mainClass="com.mycompany.tfi_comunic.Application"
     ```
 
     También se puede ejecutar desde el IDE mediante
-    `TfiComunicApplication.main()`.
+    `Application.main()`.
 
 ## Cómo probarlo
 
@@ -133,11 +158,14 @@ El CRC-8 usa valor inicial `0x00` y polinomio generador `0x07`.
 4.  Observar en el panel superior izquierdo (TX) el desglose binario
     nominal y, en el panel superior derecho (RX), el binario recibido y
     la matriz diferencial XOR.
-5.  En el panel inferior se muestra el resultado del CRC-8:
+5.  En el panel inferior izquierdo se muestra el procedimiento de Hamming
+    (tabla de codificación, controles de paridad, síndrome y bit
+    corregido) y en el inferior derecho el resultado del CRC-8:
     -   **Enlace íntegro:** los CRC coinciden y no hay bits alterados.
-    -   **Trama descartada:** se muestra la diferencia entre el CRC
-        recibido y el recalculado, y una reconstrucción didáctica del
-        mensaje original.
+    -   **Corregida por Hamming:** se corrigieron bits y el CRC-8 lo
+        confirma; se muestra el mensaje corregido.
+    -   **Trama descartada:** el CRC-8 sigue sin coincidir tras la
+        corrección (o el FEC está desactivado); no se entrega el mensaje.
 6.  Para forzar errores, basta con tapar parcialmente el LED o
     introducir interferencia lumínica durante la transmisión.
 
@@ -149,8 +177,10 @@ El código está organizado por capas:
 -   La interfaz gráfica (`view`) no conoce `SerialPort`.
 -   La capa `io` no conoce el protocolo.
 
-El CRC-8 detecta errores, pero no los corrige; la reconstrucción
-mostrada es didáctica y utiliza el buffer original en memoria.
+El CRC-8 detecta errores pero no los corrige; la corrección la hace
+Hamming usando únicamente los bits recibidos. La trama transmitida solo
+se usa para mostrar la matriz diferencial XOR y la verificación de
+laboratorio.
 
 **Principios SOLID aplicados:**
 

@@ -1,5 +1,6 @@
 package view;
 
+import core.ModoEnlace;
 import core.TramaVlc;
 import io.ComunicacionSerie;
 import service.EnvioVlc;
@@ -17,11 +18,13 @@ public class VlcApp extends JFrame {
 
     private final PanelTx panelTx = new PanelTx();
     private final PanelRx panelRx = new PanelRx();
+    private final PanelHamming panelHamming = new PanelHamming();
     private final JLabel badgePort = TemaVlc.badge("CONEXIÓN: BUSCANDO...", TemaVlc.TEXT_MUTED);
     private final JLabel badgeCrc  = TemaVlc.badge("CANAL: REPOSO", TemaVlc.TEXT_MUTED);
     private final PanelValidacion panelValidacion = new PanelValidacion(badgeCrc);
     private final JTextField inputField = new JTextField();
     private final JButton sendButton = new JButton("TRANSMITIR TRAMA VLC");
+    private final JCheckBox chkHamming = new JCheckBox("FEC Hamming (12,8)", true);
 
     public VlcApp() {
         configurarVentana();
@@ -79,15 +82,22 @@ public class VlcApp extends JFrame {
         split.setOpaque(false);
         split.setBorder(null);
         split.setDividerSize(6);
-        split.setResizeWeight(0.66);
+        split.setResizeWeight(0.5);
 
         JPanel dataPanels = new JPanel(new GridLayout(1, 2, 14, 0));
         dataPanels.setOpaque(false);
         dataPanels.add(panelTx);
         dataPanels.add(panelRx);
 
+        JSplitPane inferior = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                panelHamming, panelValidacion);
+        inferior.setOpaque(false);
+        inferior.setBorder(null);
+        inferior.setDividerSize(6);
+        inferior.setResizeWeight(0.6);
+
         split.setTopComponent(dataPanels);
-        split.setBottomComponent(panelValidacion);
+        split.setBottomComponent(inferior);
         return split;
     }
 
@@ -120,7 +130,19 @@ public class VlcApp extends JFrame {
         sendButton.setBorder(new EmptyBorder(8, 20, 8, 20));
         sendButton.addActionListener(e -> enviarMensaje());
         inputField.addActionListener(e -> enviarMensaje());
-        bar.add(sendButton, BorderLayout.EAST);
+
+        chkHamming.setOpaque(false);
+        chkHamming.setForeground(TemaVlc.TEXT_WHITE);
+        chkHamming.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        chkHamming.setFocusPainted(false);
+        chkHamming.setToolTipText("Activado: corrige errores simples con Hamming y verifica con CRC-8. "
+                + "Desactivado: solo CRC-8 (detecta y descarta).");
+
+        JPanel acciones = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+        acciones.setOpaque(false);
+        acciones.add(chkHamming);
+        acciones.add(sendButton);
+        bar.add(acciones, BorderLayout.EAST);
         return bar;
     }
 
@@ -143,13 +165,17 @@ public class VlcApp extends JFrame {
     private void enviarMensaje() {
         if (servicioEnvio == null) return;
         String texto = inputField.getText().trim();
-        TramaVlc trama = servicioEnvio.enviarTexto(texto);
+        ModoEnlace modo = chkHamming.isSelected()
+                ? ModoEnlace.CRC_HAMMING : ModoEnlace.SOLO_CRC;
+        TramaVlc trama = servicioEnvio.enviarTexto(texto, modo);
         if (trama == null) return;
 
         panelTx.limpiar();
         panelRx.limpiar();
+        panelHamming.limpiar();
         panelValidacion.limpiar();
         panelTx.mostrarTrama(trama);
+        panelHamming.mostrarCodificacion(trama, modo);
         TemaVlc.actualizarBadge(badgeCrc, "TRANSMITIENDO...", TemaVlc.CYAN_ACCENT);
         inputField.setText("");
     }
@@ -157,6 +183,7 @@ public class VlcApp extends JFrame {
     private void onTramaValidada(RecepcionVlc.ResultadoValidacion r) {
         SwingUtilities.invokeLater(() -> {
             panelRx.mostrar(r);
+            panelHamming.mostrar(r);
             panelValidacion.mostrar(r);
         });
     }
