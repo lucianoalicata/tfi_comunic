@@ -18,13 +18,15 @@ public class VlcApp extends JFrame {
 
     private final PanelTx panelTx = new PanelTx();
     private final PanelRx panelRx = new PanelRx();
-    private final PanelHamming panelHamming = new PanelHamming();
+    private final PanelHamming panelHammingTx = new PanelHamming(true);
+    private final PanelHamming panelHammingRx = new PanelHamming(false);
     private final JLabel badgePort = TemaVlc.badge("CONEXIÓN: BUSCANDO...", TemaVlc.TEXT_MUTED);
     private final JLabel badgeCrc  = TemaVlc.badge("CANAL: REPOSO", TemaVlc.TEXT_MUTED);
     private final PanelValidacion panelValidacion = new PanelValidacion(badgeCrc);
     private final JTextField inputField = new JTextField();
     private final JButton sendButton = new JButton("TRANSMITIR TRAMA VLC");
     private final JCheckBox chkHamming = new JCheckBox("FEC Hamming (12,8)", true);
+    private final JTabbedPane pestanas = new JTabbedPane();
 
     public VlcApp() {
         configurarVentana();
@@ -44,7 +46,7 @@ public class VlcApp extends JFrame {
 
     private void construirLayout() {
         add(crearHeader(), BorderLayout.NORTH);
-        add(crearSplitPrincipal(), BorderLayout.CENTER);
+        add(crearPestanas(), BorderLayout.CENTER);
         add(crearBottomBar(), BorderLayout.SOUTH);
     }
 
@@ -61,7 +63,7 @@ public class VlcApp extends JFrame {
         t1.setFont(new Font("Segoe UI", Font.BOLD, 17));
         t1.setForeground(TemaVlc.TEXT_WHITE);
         JLabel t2 = new JLabel(
-            "Capa Física OOK (LED/LDR) — Protocolo de Enlace framing 01111110 & Polinomio CRC-8");
+                "Capa Física OOK (LED/LDR) — Protocolo de Enlace framing 01111110 & Polinomio CRC-8");
         t2.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         t2.setForeground(TemaVlc.CYAN_ACCENT);
         titles.add(t1);
@@ -77,28 +79,46 @@ public class VlcApp extends JFrame {
         return header;
     }
 
-    private JSplitPane crearSplitPrincipal() {
-        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
-        split.setOpaque(false);
-        split.setBorder(null);
-        split.setDividerSize(6);
-        split.setResizeWeight(0.5);
+    /** Dos pestañas: EMISOR y RECEPTOR. Dentro de cada una, scroll vertical. */
+    private JTabbedPane crearPestanas() {
+        pestanas.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        pestanas.addTab("EMISOR", crearPestana(
+                fijarAlto(panelTx, 340),
+                fijarAlto(panelHammingTx, 430)));
+        // En el receptor, primero el veredicto (CRC + mensaje corregido).
+        pestanas.addTab("RECEPTOR", crearPestana(
+                fijarAlto(panelValidacion, 300),
+                fijarAlto(panelRx, 420),
+                fijarAlto(panelHammingRx, 470)));
+        return pestanas;
+    }
 
-        JPanel dataPanels = new JPanel(new GridLayout(1, 2, 14, 0));
-        dataPanels.setOpaque(false);
-        dataPanels.add(panelTx);
-        dataPanels.add(panelRx);
+    private JScrollPane crearPestana(JComponent... paneles) {
+        JPanel contenido = new JPanel();
+        contenido.setLayout(new BoxLayout(contenido, BoxLayout.Y_AXIS));
+        contenido.setOpaque(false);
+        for (JComponent p : paneles) {
+            contenido.add(p);
+            contenido.add(Box.createVerticalStrut(12));
+        }
+        JPanel envoltorio = new JPanel(new BorderLayout());
+        envoltorio.setOpaque(false);
+        envoltorio.add(contenido, BorderLayout.NORTH);
 
-        JSplitPane inferior = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                panelHamming, panelValidacion);
-        inferior.setOpaque(false);
-        inferior.setBorder(null);
-        inferior.setDividerSize(6);
-        inferior.setResizeWeight(0.6);
+        JScrollPane scroll = new JScrollPane(envoltorio);
+        scroll.setBorder(null);
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.getVerticalScrollBar().setUnitIncrement(24);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        return scroll;
+    }
 
-        split.setTopComponent(dataPanels);
-        split.setBottomComponent(inferior);
-        return split;
+    private <T extends JComponent> T fijarAlto(T c, int alto) {
+        c.setPreferredSize(new Dimension(600, alto));
+        c.setMinimumSize(new Dimension(300, alto));
+        c.setMaximumSize(new Dimension(Integer.MAX_VALUE, alto));
+        return c;
     }
 
     private JPanel crearBottomBar() {
@@ -158,7 +178,10 @@ public class VlcApp extends JFrame {
             servicioEnvio = new EnvioVlc(comunicacion, servicioRx);
         } else {
             TemaVlc.actualizarBadge(badgePort, "HARDWARE: DESCONECTADO", TemaVlc.COLOR_ERR);
-            SwingUtilities.invokeLater(() -> panelValidacion.mostrarErrorConexion(r.mensaje()));
+            SwingUtilities.invokeLater(() -> {
+                pestanas.setSelectedIndex(1);
+                panelValidacion.mostrarErrorConexion(r.mensaje());
+            });
         }
     }
 
@@ -172,10 +195,11 @@ public class VlcApp extends JFrame {
 
         panelTx.limpiar();
         panelRx.limpiar();
-        panelHamming.limpiar();
+        panelHammingTx.limpiar();
+        panelHammingRx.mostrarEspera();
         panelValidacion.limpiar();
         panelTx.mostrarTrama(trama);
-        panelHamming.mostrarCodificacion(trama, modo);
+        panelHammingTx.mostrarCodificacion(trama, modo);
         TemaVlc.actualizarBadge(badgeCrc, "TRANSMITIENDO...", TemaVlc.CYAN_ACCENT);
         inputField.setText("");
     }
@@ -183,8 +207,9 @@ public class VlcApp extends JFrame {
     private void onTramaValidada(RecepcionVlc.ResultadoValidacion r) {
         SwingUtilities.invokeLater(() -> {
             panelRx.mostrar(r);
-            panelHamming.mostrar(r);
+            panelHammingRx.mostrar(r);
             panelValidacion.mostrar(r);
+            pestanas.setSelectedIndex(1);   // salta a RECEPTOR al llegar la trama
         });
     }
 }

@@ -8,16 +8,20 @@ import core.TramaVlc;
 import service.RecepcionVlc.ResultadoValidacion;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
 import javax.swing.text.*;
 import java.awt.*;
-import java.awt.geom.Rectangle2D;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.IntFunction;
 
 /**
- * Muestra el procedimiento de Hamming con el formato de la cátedra (Unidad 6, punto 12):
- * tabla n / p1..p4 / n+p a TX, y en recepción la tabla de controles, el síndrome
- * (cuyo valor decimal es la posición del bit erróneo) y la palabra corregida.
+ * Procedimiento de Hamming (12,8) con el formato de la cátedra (Unidad 6, punto 12).
+ * Una instancia se usa del lado emisor (codificación) y otra del lado receptor (decodificación).
+ * Arriba hay un selector con una ficha por palabra; abajo se ve solo la tabla de la elegida.
  */
 public class PanelHamming extends JPanel {
 
@@ -25,79 +29,134 @@ public class PanelHamming extends JPanel {
     private static final String SEP = "-------------------------------------------------------------------------------\n";
 
     private record Celda(String texto, Color color, boolean negrita) { }
+    private record Chip(JLabel etiqueta, Color color, Runnable vista) { }
 
     private static final Celda VACIA = new Celda("", TemaVlc.TEXT_MUTED, false);
 
     private final JTextPane area = TemaVlc.textPaneMono();
-    private int inicioDecodificacion;
+    private final JPanel barra = new JPanel(new GridLayout(0, 9, 4, 4));
+    private final List<Chip> chips = new ArrayList<>();
 
-    public PanelHamming() {
-        setLayout(new BorderLayout());
+    public PanelHamming(boolean emisor) {
+        setLayout(new BorderLayout(0, 6));
         setOpaque(false);
         setBorder(TemaVlc.bordeTitulado(
-                "CORRECCIÓN FEC: HAMMING (12,8) — PARIDAD PAR", TemaVlc.COLOR_WARN));
+                emisor ? "CODIFICACIÓN FEC: HAMMING (12,8) — TRANSMISOR"
+                        : "CORRECCIÓN FEC: HAMMING (12,8) — RECEPTOR",
+                emisor ? TemaVlc.CYAN_ACCENT : TemaVlc.COLOR_WARN));
+
+        barra.setOpaque(false);
+        add(barra, BorderLayout.NORTH);
         add(TemaVlc.scroll(area), BorderLayout.CENTER);
+
+        if (!emisor) {
+            JPanel leyenda = new JPanel(new FlowLayout(FlowLayout.LEFT, 14, 0));
+            leyenda.setOpaque(false);
+            leyenda.add(textoLeyenda("● Sin error", TemaVlc.COLOR_OK));
+            leyenda.add(textoLeyenda("● Corregida", TemaVlc.COLOR_WARN));
+            leyenda.add(textoLeyenda("● Incorregible", TemaVlc.COLOR_ERR));
+            add(leyenda, BorderLayout.SOUTH);
+        }
     }
+
+    private JLabel textoLeyenda(String texto, Color color) {
+        JLabel l = new JLabel(texto);
+        l.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        l.setForeground(color);
+        return l;
+    }
+
+    // ------------------------------------------------------------ selector
 
     public void limpiar() {
         area.setText("");
+        barra.removeAll();
+        chips.clear();
+        barra.revalidate();
+        barra.repaint();
     }
 
-    /** Al transmitir: solo se conoce la codificación (lado TX). */
-    public void mostrarCodificacion(TramaVlc trama, ModoEnlace modo) {
-        area.setText("");
-        if (modo != ModoEnlace.CRC_HAMMING) {
-            avisoFecDesactivado();
-            return;
+    public void mostrarEspera() {
+        limpiar();
+        append("Esperando la trama recibida para decodificar...\n", TemaVlc.TEXT_MUTED, false);
+    }
+
+    private void agregarChip(String texto, Color color, Runnable vista) {
+        final int indice = chips.size();
+        JLabel l = new JLabel(texto, SwingConstants.CENTER);
+        l.setOpaque(true);
+        l.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        l.setForeground(color);
+        l.setBackground(TemaVlc.BG_INPUT);
+        l.setBorder(bordeChip(color, false));
+        l.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        l.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                activar(indice);
+            }
+        });
+        chips.add(new Chip(l, color, vista));
+        barra.add(l);
+    }
+
+    private javax.swing.border.Border bordeChip(Color color, boolean seleccionado) {
+        int pad = seleccionado ? 2 : 4;
+        return BorderFactory.createCompoundBorder(
+                new LineBorder(color, seleccionado ? 3 : 1, true),
+                new EmptyBorder(pad, pad, pad, pad));
+    }
+
+    private void activar(int indice) {
+        for (int i = 0; i < chips.size(); i++) {
+            Chip c = chips.get(i);
+            boolean sel = i == indice;
+            c.etiqueta().setBorder(bordeChip(c.color(), sel));
+            c.etiqueta().setBackground(sel ? TemaVlc.BG_CARD : TemaVlc.BG_INPUT);
         }
-        escribirCodificacion(trama);
-        append("\nEsperando la trama recibida para decodificar...\n", TemaVlc.TEXT_MUTED, false);
-    }
-
-    /** Al recibir: codificación + decodificación completa. */
-    public void mostrar(ResultadoValidacion r) {
         area.setText("");
-        if (r.modo() != ModoEnlace.CRC_HAMMING) {
-            avisoFecDesactivado();
-            return;
-        }
-        escribirCodificacion(r.tramaEsperada());
-        escribirDecodificacion(r);
-        SwingUtilities.invokeLater(this::irADecodificacion);
-    }
-
-    /** Deja a la vista la sección 2 (la tabla de TX queda arriba, un scroll más atrás). */
-    private void irADecodificacion() {
-        try {
-            Rectangle2D r = area.modelToView2D(inicioDecodificacion);
-            JViewport vp = (JViewport) SwingUtilities.getAncestorOfClass(JViewport.class, area);
-            if (r == null || vp == null) return;
-            int maxY = Math.max(0, area.getPreferredSize().height - vp.getHeight());
-            vp.setViewPosition(new Point(0, Math.max(0, Math.min((int) r.getY(), maxY))));
-        } catch (BadLocationException ignored) { }
-    }
-
-    private void avisoFecDesactivado() {
-        append("FEC desactivado: el enlace solo usa CRC-8.\n", TemaVlc.COLOR_WARN, true);
-        append("El CRC-8 DETECTA errores pero no dice qué bit falló, así que no puede corregirlos:\n"
-                        + "la trama se descarta y habría que pedir retransmisión (ARQ).\n\n"
-                        + "Tildá \"FEC Hamming (12,8)\" para ver cómo se corrige hacia adelante.\n",
-                TemaVlc.TEXT_MUTED, false);
+        chips.get(indice).vista().run();
+        area.setCaretPosition(0);
+        barra.revalidate();
+        barra.repaint();
     }
 
     // ------------------------------------------------------------------ TX
 
-    private void escribirCodificacion(TramaVlc trama) {
-        append("1) CODIFICACIÓN EN EL TRANSMISOR\n", TemaVlc.CYAN_ACCENT, true);
-        append("n = 8 bits de datos, p = 4 bits de paridad -> 2^p >= n + p + 1  ->  16 >= 13\n"
-                        + "Cada byte del cuerpo de la trama (LONGITUD, PAYLOAD, CRC-8) pasa a una palabra de 12 bits.\n"
-                        + "Cada pk se fija para que la cantidad de unos de las posiciones que controla sea PAR.\n\n",
-                TemaVlc.TEXT_MUTED, false);
-
+    /** Al transmitir: solo se conoce la codificación (lado emisor). */
+    public void mostrarCodificacion(TramaVlc trama, ModoEnlace modo) {
+        limpiar();
+        if (modo != ModoEnlace.CRC_HAMMING) {
+            avisoFecDesactivado();
+            return;
+        }
         byte[] tx = trama.aBytesTransmision();   // [START][LONGITUD][PAYLOAD...][CRC-8]
         int total = tx.length - 1;               // una palabra por cada byte, menos START
+
+        agregarChip("RESUMEN", TemaVlc.TEXT_WHITE, () -> resumenCodificacion(trama, total, tx));
         for (int i = 0; i < total; i++) {
-            tablaCodificacion(trama, i, total, tx[i + 1] & 0xFF);
+            final int idx = i;
+            final int dato = tx[i + 1] & 0xFF;
+            agregarChip(etiquetaChip(trama, i, total), TemaVlc.CYAN_ACCENT,
+                    () -> tablaCodificacion(trama, idx, total, dato));
+        }
+        activar(0);
+    }
+
+    private void resumenCodificacion(TramaVlc trama, int total, byte[] tx) {
+        append("CODIFICACIÓN EN EL TRANSMISOR\n", TemaVlc.CYAN_ACCENT, true);
+        append("n = 8 bits de datos, p = 4 bits de paridad -> 2^p >= n + p + 1  ->  16 >= 13\n"
+                        + "Cada byte del cuerpo de la trama (LONGITUD, PAYLOAD, CRC-8) pasa a una palabra de 12 bits.\n"
+                        + "Cada pk se fija para que la cantidad de unos de las posiciones que controla sea PAR.\n"
+                        + "Elegí una palabra arriba para ver su tabla.\n\n",
+                TemaVlc.TEXT_MUTED, false);
+        append(String.format(" %-3s %-13s %-10s %s\n", "#", "Campo", "Dato", "Palabra Tx (12 bits)"),
+                TemaVlc.TEXT_MUTED, false);
+        for (int i = 0; i < total; i++) {
+            int dato = tx[i + 1] & 0xFF;
+            append(String.format(" %-3d %-13s %-10s %s\n", i + 1, nombreCampo(trama, i, total),
+                            bin(dato, 8), bin(HammingCodec.codificar(dato), 12)),
+                    TemaVlc.TEXT_WHITE, false);
         }
     }
 
@@ -120,44 +179,57 @@ public class PanelHamming extends JPanel {
             }, null);
         }
         fila("n+p a TX", pos -> celdaBit(palabra, pos, TemaVlc.CYAN_ACCENT, true), null);
-        append("\n", TemaVlc.TEXT_WHITE, false);
     }
 
     // ------------------------------------------------------------------ RX
 
-    private void escribirDecodificacion(ResultadoValidacion r) {
+    /** Al recibir: una ficha por palabra, coloreada según su estado. */
+    public void mostrar(ResultadoValidacion r) {
+        limpiar();
+        if (r.modo() != ModoEnlace.CRC_HAMMING) {
+            avisoFecDesactivado();
+            return;
+        }
         List<Palabra> palabras = r.palabras();
         byte[] tx = r.tramaEsperada().aBytesTransmision();
         int total = palabras.size();
 
+        agregarChip("RESUMEN", TemaVlc.TEXT_WHITE, () -> resumenDecodificacion(palabras, tx, r, total));
+        int primerProblema = 0;
+        for (int i = 0; i < total; i++) {
+            final int idx = i;
+            final Palabra p = palabras.get(i);
+            final int palTx = HammingCodec.codificar(tx[i + 1] & 0xFF);
+            Color color = colorPalabra(p, palTx);
+            if (primerProblema == 0 && color != TemaVlc.COLOR_OK) primerProblema = i + 1;
+            agregarChip(etiquetaChip(r.tramaEsperada(), i, total), color,
+                    () -> detalle(r, idx, total, p, palTx));
+        }
+        activar(primerProblema);   // 0 = resumen si no hubo problemas
+    }
+
+    private Color colorPalabra(Palabra p, int palTx) {
+        if (p.estado() == Estado.INCORREGIBLE) return TemaVlc.COLOR_ERR;
+        if (p.estado() == Estado.CORREGIDO) {
+            return p.palabraCorregida() == palTx ? TemaVlc.COLOR_WARN : TemaVlc.COLOR_ERR;
+        }
+        return p.palabraRx() == palTx ? TemaVlc.COLOR_OK : TemaVlc.COLOR_ERR;
+    }
+
+    private void resumenDecodificacion(List<Palabra> palabras, byte[] tx,
+                                       ResultadoValidacion r, int total) {
         long ok = palabras.stream().filter(p -> p.estado() == Estado.SIN_ERROR).count();
         long corr = palabras.stream().filter(p -> p.estado() == Estado.CORREGIDO).count();
         long inc = palabras.stream().filter(p -> p.estado() == Estado.INCORREGIBLE).count();
 
-        inicioDecodificacion = area.getDocument().getLength();
-        append(SEP, TemaVlc.BORDER_CARD, false);
-        append("2) DECODIFICACIÓN EN EL RECEPTOR\n", TemaVlc.PURPLE_RX, true);
+        append("DECODIFICACIÓN EN EL RECEPTOR\n", TemaVlc.PURPLE_RX, true);
         append("Con los 4 controles de paridad se arma el SÍNDROME (p4 p3 p2 p1): su valor decimal\n"
-                        + "es la posición del bit erróneo; si es 0000 no hay error.\n\n",
+                        + "es la posición del bit erróneo; si es 0000 no hay error.\n"
+                        + "Elegí una palabra arriba para ver su tabla de controles.\n\n",
                 TemaVlc.TEXT_MUTED, false);
         append(String.format("Palabras: %d  |  sin error: %d  |  corregidas: %d  |  incorregibles: %d\n\n",
                 total, ok, corr, inc), TemaVlc.TEXT_WHITE, true);
 
-        boolean huboDetalle = false;
-        for (int i = 0; i < total; i++) {
-            Palabra p = palabras.get(i);
-            int palTx = HammingCodec.codificar(tx[i + 1] & 0xFF);
-            if (p.estado() != Estado.SIN_ERROR || p.palabraRx() != palTx) {
-                detalle(r, i, total, p, palTx);
-                huboDetalle = true;
-            }
-        }
-        if (!huboDetalle) {
-            append("Síndrome 0000 en todas las palabras: SIN ERROR en el canal.\n\n",
-                    TemaVlc.COLOR_OK, true);
-        }
-
-        append(SEP, TemaVlc.BORDER_CARD, false);
         append("RESUMEN POR PALABRA\n", TemaVlc.TEXT_WHITE, true);
         append(String.format(" %-3s %-13s %-14s %-14s %-8s %s\n",
                         "#", "Campo", "Palabra Tx", "Palabra Rx", "Síndr.", "Resultado"),
@@ -172,13 +244,11 @@ public class PanelHamming extends JPanel {
             append("   " + bin(p.sindrome(), 4) + "    ", TemaVlc.TEXT_WHITE, false);
             resultado(p);
         }
-        append("\n", TemaVlc.TEXT_WHITE, false);
     }
 
     private void detalle(ResultadoValidacion r, int idx, int total, Palabra p, int palTx) {
-        append(SEP, TemaVlc.BORDER_CARD, false);
         append(String.format("PALABRA %d (%s) — CONTROLES DE PARIDAD EN RX\n",
-                idx + 1, nombreCampo(r, idx, total)), TemaVlc.COLOR_WARN, true);
+                idx + 1, nombreCampo(r, idx, total)), colorPalabra(p, palTx), true);
 
         int rx = p.palabraRx();
         encabezado();
@@ -221,12 +291,24 @@ public class PanelHamming extends JPanel {
                     "-> El síndrome no apunta a ninguna de las 12 posiciones: error múltiple,\n"
                             + "   NO corregible. La trama queda a cargo del CRC-8 (descarte / ARQ).\n",
                     TemaVlc.COLOR_ERR, true);
-            case SIN_ERROR -> append(
-                    "-> Síndrome 0000 pero la palabra difiere de la transmitida (3 o más errores):\n"
-                            + "   Hamming no lo nota. Lo detecta el CRC-8.\n",
-                    TemaVlc.COLOR_ERR, true);
+            case SIN_ERROR -> {
+                if (p.palabraRx() == palTx) {
+                    append("-> Síndrome 0000: la palabra llegó sin error.\n", TemaVlc.COLOR_OK, true);
+                } else {
+                    append("-> Síndrome 0000 pero la palabra difiere de la transmitida (3 o más errores):\n"
+                                    + "   Hamming no lo nota. Lo detecta el CRC-8.\n",
+                            TemaVlc.COLOR_ERR, true);
+                }
+            }
         }
-        append("\n", TemaVlc.TEXT_WHITE, false);
+    }
+
+    private void avisoFecDesactivado() {
+        append("FEC desactivado: el enlace solo usa CRC-8.\n", TemaVlc.COLOR_WARN, true);
+        append("El CRC-8 DETECTA errores pero no dice qué bit falló, así que no puede corregirlos:\n"
+                        + "la trama se descarta y habría que pedir retransmisión (ARQ).\n\n"
+                        + "Tildá \"FEC Hamming (12,8)\" para ver cómo se corrige hacia adelante.\n",
+                TemaVlc.TEXT_MUTED, false);
     }
 
     // ------------------------------------------------------- formato tabla
@@ -271,6 +353,15 @@ public class PanelHamming extends JPanel {
                     TemaVlc.COLOR_WARN, true);
             case INCORREGIBLE -> append("INCORREGIBLE\n", TemaVlc.COLOR_ERR, true);
         }
+    }
+
+    // ------------------------------------------------------------- nombres
+
+    private String etiquetaChip(TramaVlc trama, int idx, int total) {
+        if (idx == 0) return "LONG";
+        if (idx == total - 1) return "CRC-8";
+        byte[] payload = trama.getPayload();
+        return String.format("D%d '%s'", idx, caracter(payload[idx - 1] & 0xFF));
     }
 
     private String nombreCampo(ResultadoValidacion r, int idx, int total) {
